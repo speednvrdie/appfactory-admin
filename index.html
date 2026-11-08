@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AppFactory Super Admin</title>
+<style>
+:root{--bg:#f3f5f7;--card:#fff;--ink:#16202b;--mute:#5f6b78;--line:#d9dee4;--acc:#0b7a75;--accink:#fff;--bad:#b3261e}
+@media (prefers-color-scheme:dark){:root{--bg:#10161c;--card:#18212a;--ink:#e8edf2;--mute:#93a0ad;--line:#2b3742;--acc:#35b8b0;--accink:#06201f;--bad:#ff8a80}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:560px;margin:0 auto;padding:20px 16px 48px}
+h1{font-size:1.5rem;margin:8px 0 4px;letter-spacing:-.01em}
+h2{font-size:1.1rem;margin:0 0 12px}
+p.sub{color:var(--mute);margin:0 0 20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+label{display:block;font-weight:600;font-size:.9rem;margin:12px 0 4px}
+input[type=text],input[type=email],input[type=password],input[type=url]{width:100%;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}
+input[type=file]{width:100%;font:inherit;color:var(--mute)}
+input[type=color]{width:56px;height:44px;border:1px solid var(--line);border-radius:8px;background:none;padding:2px}
+input:focus,button:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.row{display:flex;gap:12px;align-items:center}
+button{font:inherit;font-weight:600;border:0;border-radius:8px;padding:12px 16px;cursor:pointer;background:var(--acc);color:var(--accink);width:100%;margin-top:16px}
+button.ghost{background:none;color:var(--mute);border:1px solid var(--line);width:auto;margin:0;padding:8px 12px;font-size:.85rem}
+button.del{background:none;color:var(--bad);border:1px solid var(--line);width:auto;margin:0;padding:6px 10px;font-size:.8rem}
+button:disabled{opacity:.6;cursor:wait}
+.top{display:flex;justify-content:space-between;align-items:center}
+.t{display:flex;gap:12px;align-items:center;padding:12px 0;border-top:1px solid var(--line)}
+.t:first-of-type{border-top:0}
+.logo{width:44px;height:44px;border-radius:10px;flex:none;display:grid;place-items:center;color:#fff;font-weight:700;overflow:hidden}
+.logo img{width:100%;height:100%;object-fit:cover}
+.t .i{flex:1;min-width:0}
+.t .n{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.t .m{color:var(--mute);font-size:.8rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hint{color:var(--mute);font-size:.85rem;margin-top:8px}
+#toast{position:fixed;left:16px;right:16px;bottom:16px;max-width:528px;margin:0 auto;background:var(--ink);color:var(--bg);padding:12px 16px;border-radius:10px;display:none;z-index:9}
+.empty{color:var(--mute);padding:8px 0}
+</style>
+</head>
+<body>
+<main id="app"></main>
+<div id="toast" role="status"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+var $ = function(s){return document.querySelector(s)};
+var app = $('#app'), sb = null;
+
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function toast(m){var t=$('#toast');t.textContent=m;t.style.display='block';clearTimeout(toast.h);toast.h=setTimeout(function(){t.style.display='none'},3500)}
+function getCfg(){try{return JSON.parse(localStorage.getItem('af_cfg')||'null')}catch(e){return null}}
+function setCfg(v){try{localStorage.setItem('af_cfg',JSON.stringify(v))}catch(e){}}
+function clearCfg(){try{localStorage.removeItem('af_cfg')}catch(e){}}
+function slug(s){return s.toLowerCase().replace(/[^a-z0-9]+/g,'').slice(0,24)||'app'}
+function initial(s){return (s||'?').trim().charAt(0).toUpperCase()}
+
+function viewSetup(){
+  app.innerHTML =
+  '<h1>AppFactory Super Admin</h1><p class="sub">Pehli baar ka setup. Ye sirf is phone ke browser mein save hoga.</p>'+
+  '<div class="card"><label for="url">Project URL</label><input id="url" type="url" placeholder="https://xxxx.supabase.co" autocapitalize="off" autocomplete="off">'+
+  '<label for="key">Anon / Publishable key</label><input id="key" type="text" placeholder="eyJ... ya sb_publishable_..." autocapitalize="off" autocomplete="off">'+
+  '<p class="hint">Supabase mein Project Settings, phir API Keys. Sirf <b>anon / publishable</b> key daalo. <b>service_role / secret</b> key kabhi mat daalna.</p>'+
+  '<button id="save">Save and continue</button></div>';
+  $('#save').onclick=function(){
+    var url=$('#url').value.trim().replace(/\/+$/,''), key=$('#key').value.trim();
+    if(!/^https:\/\/.+\.supabase\.co$/.test(url)) return toast('URL galat hai. https://...supabase.co jaisa hona chahiye');
+    if(key.length<20) return toast('Key poori paste karo');
+    if(/service_role|sb_secret/.test(key)) return toast('Ye secret key hai. anon/publishable key daalo');
+    setCfg({url:url,key:key}); boot();
+  };
+}
+
+function viewLogin(){
+  app.innerHTML =
+  '<h1>Login</h1><p class="sub">Apna admin email aur password daalo.</p>'+
+  '<div class="card"><label for="em">Email</label><input id="em" type="email" autocomplete="username">'+
+  '<label for="pw">Password</label><input id="pw" type="password" autocomplete="current-password">'+
+  '<button id="go">Log in</button></div>'+
+  '<button class="ghost" id="reset">Change project settings</button>';
+  $('#go').onclick=async function(){
+    var b=this; b.disabled=true;
+    var r=await sb.auth.signInWithPassword({email:$('#em').value.trim(),password:$('#pw').value});
+    b.disabled=false;
+    if(r.error) return toast('Login fail: '+r.error.message);
+    viewDash();
+  };
+  $('#reset').onclick=function(){clearCfg();viewSetup()};
+}
+
+async function viewDash(){
+  app.innerHTML =
+  '<div class="top"><div><h1>Create new app</h1></div><button class="ghost" id="out">Log out</button></div>'+
+  '<p class="sub">Naam, logo aur color daalo. Ek tap mein client ka config ban jayega.</p>'+
+  '<div class="card">'+
+  '<label for="name">App name</label><input id="name" type="text" placeholder="Sharma Sweets">'+
+  '<label for="pkg">Package name</label><input id="pkg" type="text" autocapitalize="off" placeholder="com.appfactory.sharmasweets">'+
+  '<label for="logo">Logo</label><input id="logo" type="file" accept="image/*">'+
+  '<label for="color">Brand color</label><div class="row"><input id="color" type="color" value="#0b7a75"><span class="hint" id="hex" style="margin:0">#0b7a75</span></div>'+
+  '<button id="create">Create app</button></div>'+
+  '<div class="card"><h2>Your apps</h2><div id="list"><div class="empty">Loading...</div></div></div>';
+
+  var pkgTouched=false;
+  $('#pkg').oninput=function(){pkgTouched=true};
+  $('#name').oninput=function(){if(!pkgTouched)$('#pkg').value='com.appfactory.'+slug(this.value)};
+  $('#color').oninput=function(){$('#hex').textContent=this.value};
+  $('#out').onclick=async function(){await sb.auth.signOut();viewLogin()};
+  $('#create').onclick=async function(){
+    var b=this, name=$('#name').value.trim();
+    if(!name) return toast('App ka naam likho');
+    b.disabled=true; b.textContent='Creating...';
+    var logoUrl=null, f=$('#logo').files[0];
+    if(f){
+      var ext=((f.name.split('.').pop())||'png').toLowerCase().replace(/[^a-z0-9]/g,'');
+      var path=Date.now()+'-'+slug(name)+'.'+ext;
+      var up=await sb.storage.from('logos').upload(path,f,{contentType:f.type});
+      if(up.error){b.disabled=false;b.textContent='Create app';return toast('Logo upload fail: '+up.error.message)}
+      logoUrl=sb.storage.from('logos').getPublicUrl(path).data.publicUrl;
+    }
+    var ins=await sb.from('tenants').insert({app_name:name,logo_url:logoUrl,primary_color:$('#color').value,package_name:$('#pkg').value.trim()||('com.appfactory.'+slug(name))});
+    b.disabled=false; b.textContent='Create app';
+    if(ins.error) return toast('Create fail: '+ins.error.message);
+    toast('App created: '+name);
+    $('#name').value='';$('#logo').value='';$('#pkg').value='';pkgTouched=false;
+    loadList();
+  };
+  loadList();
+}
+
+async function loadList(){
+  var box=$('#list'); if(!box) return;
+  var r=await sb.from('tenants').select('*').order('created_at',{ascending:false});
+  if(r.error){box.innerHTML='<div class="empty">Load fail: '+esc(r.error.message)+'</div>';return}
+  if(!r.data.length){box.innerHTML='<div class="empty">Abhi koi app nahi hai. Upar se pehla app banao.</div>';return}
+  box.innerHTML=r.data.map(function(t){
+    var col=/^#[0-9a-f]{6}$/i.test(t.primary_color)?t.primary_color:'#0b7a75';
+    var lg=t.logo_url?'<img src="'+esc(t.logo_url)+'" alt="">':esc(initial(t.app_name));
+    return '<div class="t"><div class="logo" style="background:'+col+'">'+lg+'</div>'+
+      '<div class="i"><div class="n">'+esc(t.app_name)+'</div><div class="m">'+esc(t.package_name||'')+'</div></div>'+
+      '<button class="del" data-id="'+esc(t.id)+'" data-n="'+esc(t.app_name)+'">Delete</button></div>';
+  }).join('');
+  box.querySelectorAll('.del').forEach(function(b){
+    b.onclick=async function(){
+      if(!confirm('"'+b.getAttribute('data-n')+'" delete karna hai?')) return;
+      var d=await sb.from('tenants').delete().eq('id',b.getAttribute('data-id'));
+      if(d.error) return toast('Delete fail: '+d.error.message);
+      toast('Deleted'); loadList();
+    };
+  });
+}
+
+async function boot(){
+  var c=getCfg();
+  if(!c) return viewSetup();
+  if(!window.supabase) {app.innerHTML='<p class="sub">Internet check karo, library load nahi hui.</p>';return}
+  sb=window.supabase.createClient(c.url,c.key);
+  var s=await sb.auth.getSession();
+  if(s.data&&s.data.session) viewDash(); else viewLogin();
+}
+boot();
+</script>
+</body>
+</html>
